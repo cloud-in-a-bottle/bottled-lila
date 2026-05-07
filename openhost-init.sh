@@ -153,11 +153,42 @@ elif [[ -f "$CRED_FILE" ]]; then
 fi
 
 if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
-    # 32 chars of base64 = 192 bits of entropy.  /dev/urandom
-    # is unconditionally available in Linux containers; tr
-    # filters out characters that would need shell-quoting.
-    ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32)
-    echo "[openhost-init] generated fresh 32-char admin password (192 bits of entropy)"
+    # 32 chars * log2(62) ~= 190 bits of entropy.  /dev/urandom
+    # is unconditionally available in Linux containers.
+    #
+    # The naive `tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 32`
+    # idiom is fragile under `set -euo pipefail`: when `head`
+    # exits after collecting 32 bytes it closes the pipe, and
+    # `tr` (which is still consuming /dev/urandom) gets SIGPIPE
+    # and exits with a non-zero status.  Bash's `pipefail` then
+    # propagates that non-zero status as the command's overall
+    # exit code, aborting the whole openhost-init script.  We
+    # avoid the SIGPIPE-vs-pipefail interaction by reading a
+    # bounded number of bytes from urandom directly, then
+    # filtering and truncating in-process — no SIGPIPE possible
+    # because there's no upstream still writing when the
+    # downstream completes.
+    ADMIN_PASSWORD=$(
+        LC_ALL=C dd if=/dev/urandom bs=128 count=1 status=none 2>/dev/null \
+        | LC_ALL=C tr -dc 'a-zA-Z0-9' \
+        | head -c 32
+    ) || true
+    if [[ "${#ADMIN_PASSWORD}" -lt 16 ]]; then
+        # 128 bytes of urandom × ~62/256 a-zA-Z0-9 yield ratio
+        # ≈ 31 chars on average, with a tiny long-tail risk of
+        # falling short of 32.  If we somehow do, retry with a
+        # bigger draw — never persist a short, weak password.
+        ADMIN_PASSWORD=$(
+            LC_ALL=C dd if=/dev/urandom bs=512 count=1 status=none 2>/dev/null \
+            | LC_ALL=C tr -dc 'a-zA-Z0-9' \
+            | head -c 32
+        ) || true
+    fi
+    if [[ "${#ADMIN_PASSWORD}" -lt 16 ]]; then
+        echo "[openhost-init] FATAL: failed to generate a strong admin password" >&2
+        exit 1
+    fi
+    echo "[openhost-init] generated fresh ${#ADMIN_PASSWORD}-char admin password (~190 bits of entropy)"
 fi
 
 # Persist for the auth_proxy to read.  Written every boot

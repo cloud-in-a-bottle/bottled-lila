@@ -74,8 +74,15 @@ fresh install:
    mongod from the persistent path.
 2. Generates the admin credentials file at
    `$OPENHOST_APP_DATA_DIR/admin-credentials.txt` (mode 0600).
-   Default admin is username=`admin`, password=`password`.
-   Override with `LILA_ADMIN_PASSWORD` env var.
+   Default admin is username=`admin`; password is randomly
+   generated on first boot (32 alphanumeric chars, ~190 bits of
+   entropy) and persisted to the credentials file for the
+   auth_proxy to read.  Override with the `LILA_ADMIN_PASSWORD`
+   env var if you want a known password (e.g. for manual login
+   debugging).  On subsequent boots the password is recovered
+   from the credentials file so it survives container restarts
+   (the seeded MongoDB user has the same password baked in via
+   `reset-db.sh`).
 3. Sources `$OPENHOST_ZONE_DOMAIN` / `$OPENHOST_APP_NAME` to
    compute `LILA_DOMAIN` (`lila.<zone>`) and `LILA_URL`
    (`https://lila.<zone>`), writing them to
