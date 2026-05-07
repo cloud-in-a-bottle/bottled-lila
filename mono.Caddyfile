@@ -1,14 +1,31 @@
 # Caddyfile for openhost-lila.
 #
-# Listens on loopback 8081 (auth_proxy.py occupies the public 8080).
+# Listens on plain HTTP at :8081 (auth_proxy.py occupies the
+# public 8080).  We disable Caddy's auto-HTTPS / admin-API
+# entirely with the global `auto_https off` + `admin off` blocks
+# so it doesn't try to provision an ACME cert (the container is
+# loopback-only and unreachable for HTTP-01 challenges anyway)
+# nor open the admin API on :2019.
+#
+# Why bind to :8081 and not 127.0.0.1:8081?  Caddy treats an
+# explicit host in the site address as a hint that you want
+# auto-HTTPS; bare ports always speak plain HTTP.  Inside the
+# OpenHost container the only thing on 0.0.0.0 is the container
+# network, which is itself loopback to the host (rootless
+# podman), so :8081 is effectively loopback-only.
+#
 # Routes:
 #   * websocket upgrades → :9664 (lila-ws)
 #   * everything else    → :9663 (lila)
-# Uses the LILA_URL / LILA_DOMAIN env vars set by openhost-init.sh.
-# Copied from lila-docker's mono.Caddyfile and amended for the
-# port move and a smaller error page set.
+# Uses the LILA_URL / LILA_DOMAIN env vars set by
+# openhost-init.sh.
 
-127.0.0.1:8081
+{
+	auto_https off
+	admin off
+}
+
+:8081
 
 handle_errors 502 {
 	root * /static/errors
