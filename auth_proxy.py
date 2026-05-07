@@ -123,8 +123,10 @@ NO_AUTO_LOGIN_PREFIXES = (
     "/assets/",
     "/login",
     "/logout",
-    "/healthz",
 )
+# /healthz is intentionally NOT in this list; it's intercepted
+# even earlier in _dispatch and answered locally without ever
+# touching upstream.  See HEALTH_PATH and _serve_health.
 
 # Health endpoint: answered locally, never forwarded.  Lila's
 # JVM cold-start takes 60-120s; the OpenHost router's
@@ -183,7 +185,11 @@ def _read_admin_creds(cred_file: str) -> tuple[str, str] | None:
     try:
         with open(cred_file, encoding="utf-8") as fh:
             content = fh.read()
-    except FileNotFoundError:
+    except OSError as exc:
+        # FileNotFoundError, PermissionError, IsADirectoryError, etc.
+        # Best-effort: we'd rather log and fall back to manual
+        # login than crash the auth-proxy and 500 every request.
+        log.warning("auto-login: failed to read %s: %s", cred_file, exc)
         return None
     user = password = None
     for line in content.splitlines():
@@ -272,8 +278,8 @@ def _login_to_lila(
     finally:
         try:
             conn.close()
-        except Exception:  # noqa: BLE001
-            pass
+        except OSError as close_exc:
+            log.debug("auto-login: conn.close() raised: %s", close_exc)
 
     # Accept any 2xx or 3xx — Lila's /login returns 303 on
     # success for HTML accepts but 200 with sessionId in JSON
@@ -490,13 +496,23 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
             self._safe_send_error(502, "Bad Gateway")
             return
 
+        # We open a buffered file wrapper around the upstream
+        # socket to readline() the status line and headers.
+        # The wrapper must be closed alongside the socket; the
+        # finally below handles all four early-return paths.
+        up_file = None
         try:
-            # Reconstruct the request line + headers.
-            request = f"{self.command} {self.path} HTTP/1.1\r\n"
-            for k, v in cleaned_headers:
-                request += f"{k}: {v}\r\n"
-            request += "\r\n"
-            up.sendall(request.encode("latin-1"))
+            try:
+                # Reconstruct the request line + headers.
+                request = f"{self.command} {self.path} HTTP/1.1\r\n"
+                for k, v in cleaned_headers:
+                    request += f"{k}: {v}\r\n"
+                request += "\r\n"
+                up.sendall(request.encode("latin-1"))
+            except OSError as exc:
+                log.warning("ws: upstream send failed: %s", exc)
+                self._safe_send_error(502, "Bad Gateway")
+                return
 
             # Read the upstream response headers + 101 line, copy
             # to the client.  Then swap to bidirectional copy.
@@ -546,6 +562,11 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
             t1.join()
             t2.join()
         finally:
+            if up_file is not None:
+                try:
+                    up_file.close()
+                except OSError:
+                    pass
             try:
                 up.close()
             except OSError:
@@ -556,11 +577,26 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
             self.headers.items(),
             HOP_BY_HOP_HEADERS | ALWAYS_STRIP_HEADERS,
         )
+        # Always emit a Host header upstream.  We strip the
+        # client's Host (it's hop-by-hop here because we may
+        # rewrite it), and skip_host=True on conn.putrequest
+        # disables http.client's auto-injection.  If we don't
+        # add one back, the upstream HTTP/1.1 request has no
+        # Host header at all — RFC 9112 violation, Caddy 400's
+        # the request, Lila's Origin check fails.
         forwarded_host = self.headers.get("X-Forwarded-Host", "").strip()
-        if forwarded_host:
-            # Caddy / Lila enforce Origin against the public URL;
-            # rewrite Host to match before forwarding.
-            cleaned_headers.append(("Host", forwarded_host))
+        if not forwarded_host:
+            # Direct curl / health probe / misconfigured router:
+            # synthesise a Host header from the upstream addr so
+            # at least the request is RFC-valid.  Caddy will route
+            # via path regardless of Host (we use a single
+            # default site `:8081`), and Lila's per-request
+            # Origin check generally tolerates loopback Host on
+            # non-Origin-checked routes.
+            forwarded_host = f"{self.upstream_host}:{self.upstream_port}"
+        # Caddy / Lila enforce Origin against the public URL;
+        # rewrite Host to match before forwarding.
+        cleaned_headers.append(("Host", forwarded_host))
 
         transfer_encoding = self.headers.get("Transfer-Encoding", "").lower().strip()
         if transfer_encoding and transfer_encoding != "identity":
@@ -662,10 +698,19 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
             reason = upstream.reason or ""
             try:
                 self.send_response(upstream.status, reason)
+                # Strip hop-by-hop headers (including Transfer-
+                # Encoding: chunked and Content-Length) from the
+                # upstream response, then re-emit a Content-Length
+                # ourselves matching the buffered ``payload``.
+                # Without re-adding Content-Length the browser has
+                # no body delimiter on HTTP/1.1 keep-alive
+                # connections and either hangs or treats the
+                # response as length=0.
                 for key, value in upstream.getheaders():
                     if key.lower() in HOP_BY_HOP_HEADERS:
                         continue
                     self.send_header(key, value)
+                self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
                 if self.command != "HEAD":
                     self.wfile.write(payload)

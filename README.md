@@ -93,16 +93,21 @@ On subsequent boots:
 
 ## Persistence
 
-`$OPENHOST_APP_DATA_DIR/lila/` (mode 0700) holds:
+`$OPENHOST_APP_DATA_DIR` (typically `/data/app_data/lila/` —
+the OpenHost-managed bind mount) holds:
 
-- `mongodb/` — MongoDB data dir (game / user / tournament state)
-- `redis/` — Redis appendonly file (session cache; survivable to
-  loss but speeds re-warm)
-- `admin-credentials.txt` — auto-login creds (mode 0600)
-- `.seeded-once` — sentinel that skips destructive re-seeding
-  on subsequent boots
+- `mongodb/` — MongoDB data dir (game / user / tournament
+  state).  Copied from `/seeded` on first boot only.
+- `redis/` — Redis appendonly file (session cache; survivable
+  to loss but speeds re-warm).
+- `admin-credentials.txt` — auto-login creds (mode 0600).
 
-Backup target: the entire `lila/` dir.
+The presence of `mongodb/WiredTiger.wt` is the authoritative
+"this dir is initialised" sentinel.  reset-db.sh runs (with
+its destructive `--drop-db`) only on the very first boot, when
+that file is absent.
+
+Backup target: the entire `$OPENHOST_APP_DATA_DIR` dir.
 
 ## Resources
 

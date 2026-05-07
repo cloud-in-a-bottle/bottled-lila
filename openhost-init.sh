@@ -73,6 +73,16 @@ LILA_URL="https://${LILA_DOMAIN}"
 # fixtures on top of whatever's there, but it's idempotent and
 # skips users that already exist.
 
+# A single sentinel — the presence of MongoDB's WiredTiger.wt
+# storage file — is the source of truth for "this dir is a
+# real, populated MongoDB data dir."  Both decisions ("should I
+# copy /seeded?" and "should reset-db.sh be allowed to wipe
+# this?") key off the same fact.  Earlier versions used two
+# independent sentinel files which could disagree (e.g. if a
+# partial restore brought back the WiredTiger files but not the
+# .seeded-once flag, reset-db.sh would wipe the restored
+# database).
+FRESHLY_SEEDED=0
 if [[ ! -f "$MONGO_DBPATH/WiredTiger.wt" ]]; then
     echo "[openhost-init] No prior MongoDB data at $MONGO_DBPATH; copying /seeded"
     mkdir -p "$MONGO_DBPATH"
@@ -82,53 +92,95 @@ if [[ ! -f "$MONGO_DBPATH/WiredTiger.wt" ]]; then
     # this is a no-op; left explicit for any future image where
     # mongod drops privileges.
     chown -R "$(id -u)":"$(id -g)" "$MONGO_DBPATH" 2>/dev/null || true
+    FRESHLY_SEEDED=1
 else
     echo "[openhost-init] MongoDB data already present at $MONGO_DBPATH; not copying"
-fi
-
-# Also flag /seeded as "already used" so reset-db.sh can be run
-# safely against the persistent dir without it re-seeding from
-# scratch (which would wipe operator state).  We do this by
-# touching a sentinel file inside the persistent dir; the lila
-# program in supervisord conditionally runs reset-db.sh based on
-# the absence of this file.
-SEED_SENTINEL="$PERSIST/.seeded-once"
-FRESHLY_SEEDED=0
-if [[ ! -f "$SEED_SENTINEL" ]]; then
-    FRESHLY_SEEDED=1
-    touch "$SEED_SENTINEL"
 fi
 
 # ----------------------------------------------------------------------
 # Admin credentials
 # ----------------------------------------------------------------------
 # The seeded DB has the admin user's bpass set to the hash of
-# "password" by default (lila-db-seed/spamdb.py defaults
-# --su-password to "password" when LILA_USER_PASSWORD is unset).
-# We persist that information here for the auth_proxy.  We also
-# set LILA_USER_PASSWORD ahead of supervisord starting reset-db.sh
-# so the seeded password doesn't drift between the two scripts.
+# whatever password lila-db-seed's spamdb.py was passed via
+# --su-password.  reset-db.sh (which we run on first boot only)
+# reads $LILA_USER_PASSWORD from its environment and uses that.
 #
-# Why "password" rather than something stronger?  Inside the
-# container only the auth_proxy talks to /login, and the
-# OpenHost router gates anonymous access at the public-URL
-# boundary.  An attacker who can reach loopback /login has
-# already broken the container.  This is a defense-in-depth
-# secret, not a real one.  Operators who care about the secret
-# anyway can override LILA_ADMIN_PASSWORD via the OpenHost env
-# customization mechanism — both the seeding step and the
-# auth_proxy will pick it up.
+# Default behaviour:
+#   * Honour an explicit LILA_ADMIN_PASSWORD env var if set —
+#     the operator wants a known password.
+#   * Otherwise: on FIRST boot, generate a strong random
+#     password and persist it.  The operator never sees it
+#     directly (auth_proxy auto-logs them in over SSO); they
+#     can read it from the persistent CRED_FILE if needed for
+#     manual debugging.
+#   * On subsequent boots: read the persisted password back so
+#     it survives container restarts.
+#
+# Why generate rather than use a fixed default?  Even though
+# /login is only reachable via the OpenHost router (which gates
+# anonymous traffic at the public-URL boundary), defense in
+# depth says: don't ship a fixed default password.  If the
+# OpenHost router is ever misconfigured to expose /login as
+# public, every openhost-lila install would have the same
+# trivially-guessable admin password.
 
 ADMIN_USER="${LILA_ADMIN_USER:-admin}"
-ADMIN_PASSWORD="${LILA_ADMIN_PASSWORD:-password}"
 
-# Persist for the auth_proxy to read.  Written defensively:
-# rebuild on every boot in case the operator rotated
-# LILA_ADMIN_PASSWORD between restarts.
+if [[ -n "${LILA_ADMIN_PASSWORD:-}" ]]; then
+    ADMIN_PASSWORD="$LILA_ADMIN_PASSWORD"
+    echo "[openhost-init] admin password sourced from LILA_ADMIN_PASSWORD env var"
+elif [[ -f "$CRED_FILE" ]]; then
+    # Re-read existing password from a prior boot.  Awk-extract
+    # the LILA_ADMIN_PASSWORD line; tolerant of either single
+    # or double quoting around the value.
+    ADMIN_PASSWORD=$(
+        awk -F= '
+            /^[[:space:]]*(export[[:space:]]+)?LILA_ADMIN_PASSWORD[[:space:]]*=/ {
+                # strip the leading KEY= part and any surrounding quotes
+                sub(/^[[:space:]]*(export[[:space:]]+)?LILA_ADMIN_PASSWORD[[:space:]]*=[[:space:]]*/, "")
+                gsub(/^['\''"]|['\''"]$/, "")
+                print
+                exit
+            }
+        ' "$CRED_FILE"
+    )
+    if [[ -z "$ADMIN_PASSWORD" ]]; then
+        echo "[openhost-init] WARNING: $CRED_FILE exists but LILA_ADMIN_PASSWORD missing or unparseable; regenerating"
+        ADMIN_PASSWORD=""
+    else
+        echo "[openhost-init] admin password recovered from prior boot's $CRED_FILE"
+    fi
+fi
+
+if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
+    # 32 chars of base64 = 192 bits of entropy.  /dev/urandom
+    # is unconditionally available in Linux containers; tr
+    # filters out characters that would need shell-quoting.
+    ADMIN_PASSWORD=$(LC_ALL=C tr -dc 'a-zA-Z0-9' < /dev/urandom | head -c 32)
+    echo "[openhost-init] generated fresh 32-char admin password (192 bits of entropy)"
+fi
+
+# Persist for the auth_proxy to read.  Written every boot
+# (idempotent if the value is unchanged).
+#
+# Note on rotation: changing the password after first boot
+# requires updating the admin user's bpass in MongoDB too,
+# because reset-db.sh runs on first boot only (it's
+# destructive — passes --drop-db).  Rotation flow:
+#   1. Delete $PERSIST/.seeded-once and the entire
+#      $PERSIST/mongodb dir.
+#   2. Set LILA_ADMIN_PASSWORD=<new> via OpenHost env vars.
+#   3. Restart the app.  reset-db.sh re-runs with the new
+#      password and the persistent dir is repopulated.
+# This wipes user state — it's a clean reset, not a password-
+# only rotation.  A surgical password change can be done via
+# /account/security in Lila's web UI (auth_proxy will
+# silently still log in with the OLD password until you
+# update CRED_FILE on disk to match).
 umask 077
 cat > "$CRED_FILE" <<EOF
 # auth_proxy reads this file to auto-login on owner requests.
-# Format: shell-style export lines.
+# Format: shell-style export lines.  Mode 0600.
 export LILA_ADMIN_USER='$ADMIN_USER'
 export LILA_ADMIN_PASSWORD='$ADMIN_PASSWORD'
 EOF
