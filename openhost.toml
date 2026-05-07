@@ -1,0 +1,78 @@
+[app]
+name = "lila"
+version = "0.1.0"
+description = "Lichess (Lila) chess server, packaged for OpenHost with one-click SSO.  A self-hosted Lichess instance that lets the OpenHost zone owner play, study, do puzzles, and use Lichess's full feature set without ever seeing Lila's native login page.  Bundles MongoDB, Redis, lila, lila-ws, and Caddy in a single container; pre-seeded with a few hundred sample users so the lobby and tournaments aren't empty."
+authors = ["Andrew Laack <andrew@laack.co>"]
+
+[runtime.container]
+# auth_proxy listens on 8080 (the OpenHost-routed port).  Inside
+# the container, Caddy is moved off 8080 to 127.0.0.1:8081 (so
+# the auth_proxy can sit in front).  Caddy then routes:
+#   * /socket/v* (websockets) → 127.0.0.1:9664 (lila-ws)
+#   * everything else        → 127.0.0.1:9663 (lila)
+image = "Dockerfile"
+port = 8080
+
+[routing]
+# Lila's /login GET is the unauth landing form; we deliberately
+# do NOT route the OpenHost healthcheck to a Lila endpoint
+# because Lila takes 60-120s to fully boot (it's the JVM, with
+# the MongoDB seeding step running ahead of it).  The auth_proxy
+# itself returns 200 on /healthz the moment it binds, well before
+# the upstream is up — this is the same pattern openhost-joplin
+# and openhost-bookstack use to satisfy OpenHost's "container
+# alive" probe without flapping during cold start.
+health_check = "/healthz"
+# /healthz is the unauth probe used by the OpenHost router and
+# dashboard.  /login is exposed because the auth_proxy POSTs
+# to it from inside the container during the auto-login dance,
+# but it stays unauth from the OpenHost-router perspective so
+# that Lila's own login page stays accessible as a fallback if
+# auto-login ever fails.
+#
+# /socket/ is the lila-ws WebSocket endpoint.  The Lichess
+# desktop / mobile clients open a WS connection here for live
+# game updates; bypassing the auth_proxy auto-login dance for
+# WS upgrades avoids a redirect during the WS handshake (which
+# the WS client would error on).  Lila's session cookie travels
+# along on the WS upgrade, so authenticated owner-driven WS
+# connections still work; anonymous WS opens are rejected by
+# lila-ws based on the cookie's absence, not by us.
+#
+# /assets/ are the static frontend assets — JS, CSS, images.
+# They're hashed-by-content and individually safe to serve to
+# anonymous clients (Caddy serves them directly without ever
+# touching Lila's JVM).
+public_paths = [
+    "/healthz",
+    "/login",
+    "/socket/",
+    "/assets/",
+    "/api/socket",
+]
+
+[resources]
+# Lila is a JVM monster.  -Xmx4g is what the upstream mono image
+# pins (see lila-docker/docker/mono.Dockerfile).  Plus MongoDB,
+# Redis, lila-ws (another JVM, smaller heap), Caddy — call it
+# 6 GiB safely.  The OpenHost host on andrew-1 has 31 GiB so
+# this is comfortable.
+memory_mb = 6144
+cpu_millicores = 3000
+
+[data]
+# Persistent state under /data/app_data/lila/:
+#   * mongodb/             — MongoDB data dir.  Seeded from the
+#                            image's /seeded on first boot, then
+#                            grown by Lila's writes.
+#   * redis/               — Redis appendonly file (mostly cache;
+#                            losing it survives without data
+#                            loss but trips a long re-warm).
+#   * admin-credentials.txt — generated admin password the
+#                             auth_proxy uses for auto-login
+#                             (chmod 0600).
+app_data = true
+# Lila and lila-ws spill JVM-side scratch (compiled templates,
+# uploaded asset thumbnails) to /tmp; let it use the OpenHost
+# temp dir.
+app_temp_data = true
