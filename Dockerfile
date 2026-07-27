@@ -50,7 +50,41 @@
 # Reusing it means we don't have to compile Scala (a 30+ minute
 # sbt step) inside our build context.
 
+# lila-fishnet — the Scala move-broker that lets AI/"play with the
+# computer" games work.  Lila does NOT compute AI opponent moves
+# itself: on an AI game it publishes a move request to Redis
+# (channel "fishnet-out") and expects a fishnet client to answer.
+# Its own /fishnet HTTP endpoint deliberately REFUSES move work
+# ("Can't acquire a move directly on lichess!") — move work must go
+# through the separate lila-fishnet service, which bridges Redis
+# (fishnet-in/out) to an HTTP queue on :9665 that Stockfish workers
+# poll.  We copy the pre-built app + its bundled JDK from the
+# official image rather than run a 20-minute sbt build.
+FROM ghcr.io/lichess-org/lila-fishnet:latest AS lila-fishnet
+
 FROM ghcr.io/lichess-org/lila-docker:latest
+
+# Bring in the pre-built lila-fishnet app and the JDK it ships with.
+# sbt-native-packager lays the app out under /opt/docker (launcher
+# at /opt/docker/bin/lila-fishnet) and the JRE under
+# /opt/java/openjdk.  We install the JDK at a distinct path
+# (/opt/lila-fishnet-java) so it can't collide with anything the
+# mono image already has, and point the launcher at it via
+# JAVA_HOME in supervisord.
+COPY --from=lila-fishnet /opt/docker /opt/lila-fishnet
+COPY --from=lila-fishnet /opt/java/openjdk /opt/lila-fishnet-java
+
+# fishnet — the Stockfish worker that actually computes the moves.
+# Static x86_64 musl binary from the upstream release; no runtime
+# deps.  Pinned to a specific version for reproducibility.  In
+# lila's offline_mode (base.conf: fishnet.offline_mode = true) any
+# client may serve moves without a registered key.
+ARG FISHNET_VERSION=v2.14.0
+ARG FISHNET_SHA256=""
+RUN curl -fsSL -o /usr/local/bin/fishnet \
+      "https://github.com/lichess-org/fishnet/releases/download/${FISHNET_VERSION}/fishnet-x86_64-unknown-linux-musl" \
+ && chmod 0755 /usr/local/bin/fishnet \
+ && /usr/local/bin/fishnet --version
 
 # Override the upstream mono.Caddyfile with one that listens on
 # loopback :8081 instead of :8080, so our auth_proxy can sit in

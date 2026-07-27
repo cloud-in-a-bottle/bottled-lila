@@ -73,11 +73,14 @@ public_paths = [
 [resources]
 # Lila is a JVM monster.  -Xmx4g is what the upstream mono image
 # pins (see lila-docker/docker/mono.Dockerfile).  Plus MongoDB,
-# Redis, lila-ws (another JVM, smaller heap), Caddy — call it
-# 6 GiB safely.  The OpenHost host on andrew-1 has 31 GiB so
-# this is comfortable.
-memory_mb = 6144
-cpu_millicores = 3000
+# Redis, lila-ws (another JVM, smaller heap), Caddy, and now
+# lila-fishnet (a third, small JVM) + a Stockfish worker (2 cores
+# of native search during AI games).  Bump to 8 GiB / 4 CPUs so the
+# fishnet worker's Stockfish search doesn't starve the lila /
+# lila-ws JVMs while an AI game is in progress.  The OpenHost host
+# on andrew-1 has 31 GiB so this is comfortable.
+memory_mb = 8192
+cpu_millicores = 4000
 
 [data]
 # Persistent state under /data/app_data/lila/:
