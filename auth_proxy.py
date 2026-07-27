@@ -24,14 +24,22 @@ Auth model summary:
     openhost.toml: /healthz, /login, /socket/, /assets/,
     /api/socket.
 
-  * Owner with a Lila ``lila2`` cookie → forward unchanged.
+  * Owner with an *authenticated* Lila ``lila2`` cookie (one
+    carrying a ``sid`` key) → forward unchanged.
 
-  * Owner without a Lila ``lila2`` cookie → POST to Lila's
+  * Owner without an authenticated Lila session → POST to Lila's
     /login with admin credentials, capture the Set-Cookie,
     issue a 302 to the same path with the cookie set.  We only
     do this on top-level HTML navigations (Accept: text/html)
     so XHR / asset fetches don't get caught in a redirect loop
-    while the session is being established.
+    while the session is being established.  Note "without an
+    authenticated session" includes the case where a ``lila2``
+    cookie is present but *logged-out*: when the owner clicks
+    "Log out" in Lila's UI, Lila re-bakes ``lila2`` to an empty
+    (``sid``-less) session rather than deleting it, so a
+    presence-only check would strand the owner logged-out
+    forever.  We key on the ``sid`` key instead — see
+    ``_has_authenticated_lila_session``.
 
   * /healthz → answered locally by the proxy (200 ``ok``);
     NEVER forwarded to Caddy, because Caddy's upstream Lila
@@ -72,6 +80,23 @@ from typing import AbstractSet, Iterable
 OWNER_HEADER_NAME = "X-OpenHost-Is-Owner"
 USER_HEADER_NAME = "X-OpenHost-User"
 LILA_SESSION_COOKIE = "lila2"
+
+# Lila's ``lila2`` cookie is a Play signed-session cookie of the form
+# ``<hmac>-<urlencoded-session-querystring>``.  An *authenticated* session
+# carries a ``sid`` key in that querystring (see lila's
+# ``core/security.scala``: ``val sessionId = "sid"``); an anonymous /
+# logged-out session does not.  Crucially, when the owner clicks "Log out"
+# in Lila's UI, Lila does NOT delete the cookie — it re-bakes ``lila2`` to
+# an *empty* session (``lila2=<hmac>-``, no ``sid``).  So the cookie is
+# still present but no longer represents a logged-in user.
+#
+# We therefore must NOT treat the mere presence of a ``lila2`` cookie as
+# "has a session"; otherwise, after a logout, the stale anonymous cookie
+# would suppress auto-login forever and strand the owner as an anonymous
+# visitor on their own instance (defeating the whole point of Pattern B).
+# Instead we treat a ``lila2`` cookie as an authenticated session only when
+# it contains a ``sid`` key.
+LILA_SID_KEY = "sid"
 
 # Hop-by-hop headers (RFC 9110 §7.6.1) plus the framing headers
 # we rebuild ourselves at the proxy seam.
@@ -164,6 +189,33 @@ def _parse_cookie_header(cookie_header: str | None) -> dict[str, str]:
         name, value = part.split("=", 1)
         result.setdefault(name.strip(), value.strip())
     return result
+
+
+def _has_authenticated_lila_session(cookies: dict[str, str]) -> bool:
+    """Return True iff the ``lila2`` cookie represents a *logged-in* session.
+
+    The cookie value is ``<hmac>-<urlencoded-session-querystring>``.  A
+    logged-in session has a ``sid`` key in the querystring; a logged-out /
+    anonymous one does not (Lila re-bakes an empty session on logout rather
+    than discarding the cookie).  See LILA_SID_KEY above for the rationale.
+
+    We only inspect the cookie's own structure — never trust or decode the
+    HMAC — so this is a cheap, signature-agnostic check.  A malformed or
+    truncated cookie (no ``-`` separator, empty querystring) is treated as
+    "not authenticated", which is the safe default: worst case we attempt an
+    auto-login that Lila will accept, re-establishing a valid session.
+    """
+    raw = cookies.get(LILA_SESSION_COOKIE)
+    if not raw:
+        return False
+    # Split off the HMAC prefix; the session data is everything after the
+    # first ``-``.  urllib.parse.parse_qs tolerates the empty string.
+    _, sep, querystring = raw.partition("-")
+    if not sep:
+        # No ``-`` at all: not a well-formed lila2 session cookie.
+        return False
+    parsed = urllib.parse.parse_qs(querystring, keep_blank_values=False)
+    return LILA_SID_KEY in parsed
 
 
 def _strip_headers(
@@ -386,7 +438,12 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
 
         is_owner = self.headers.get(OWNER_HEADER_NAME, "").lower() == "true"
         cookies = _parse_cookie_header(self.headers.get("Cookie"))
-        has_lila_session = LILA_SESSION_COOKIE in cookies
+        # Presence of a lila2 cookie is NOT enough: a logged-out owner still
+        # has a (stale, anonymous) lila2 cookie.  Only a cookie carrying a
+        # ``sid`` counts as an authenticated session; otherwise we re-fire
+        # auto-login so the owner isn't stranded logged-out after clicking
+        # "Log out" in Lila's own UI.  See _has_authenticated_lila_session.
+        has_lila_session = _has_authenticated_lila_session(cookies)
 
         accept = self.headers.get("Accept", "")
         is_html_navigation = (

@@ -33,7 +33,8 @@ build).
                                        X-OpenHost-Is-Owner)
                   ──▶ container :8080  (auth_proxy.py)
                           │
-                          │ owner without lila2 cookie?
+                          │ owner without an authenticated
+                          │ lila2 session (no sid)?
                           │  → POST /login as `admin`,
                           │    capture Set-Cookie: lila2=...,
                           │    302 with cookie → original URL
@@ -53,12 +54,20 @@ build).
 
 - **Anonymous on a gated path** — OpenHost router 302's to the
   zone's SSO before the request reaches us.
-- **Owner with `lila2` cookie** — forwarded transparently.
-- **Owner without `lila2` cookie** — auth_proxy POSTs admin
-  credentials to Lila's `/login`, captures `Set-Cookie:
-  lila2=...; HttpOnly`, issues a 302 to the same path with the
-  cookie set.  The user lands logged in as `admin` (a seeded
-  ROLE_ADMIN user).
+- **Owner with an authenticated `lila2` session** — forwarded
+  transparently.  "Authenticated" means the `lila2` cookie
+  carries a `sid` key (Lila's logged-in-session marker).
+- **Owner without an authenticated `lila2` session** — auth_proxy
+  POSTs admin credentials to Lila's `/login`, captures
+  `Set-Cookie: lila2=...; HttpOnly`, issues a 302 to the same
+  path with the cookie set.  The user lands logged in as `admin`
+  (a seeded ROLE_ADMIN user).  This case covers both a *missing*
+  `lila2` cookie and a *logged-out* one: when the owner clicks
+  "Log out" in Lila's UI, Lila re-bakes `lila2` to an empty
+  (`sid`-less) session rather than deleting it, so keying on mere
+  cookie presence would strand the owner logged-out forever.  We
+  key on the `sid` key instead, so the next top-level navigation
+  transparently re-establishes the admin session.
 
 Auto-login fires on top-level HTML navigations only (so XHR /
 asset fetches don't get caught in a redirect loop while the
