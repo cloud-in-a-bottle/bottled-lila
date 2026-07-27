@@ -37,7 +37,7 @@ build).
                           │
                           │ owner (X-OpenHost-Is-Owner: true)
                           │ without an authenticated lila2
-                          │ session (no sid)?
+                          │ session (no sessionId)?
                           │  → POST /login as `admin`,
                           │    capture Set-Cookie: lila2=...,
                           │    302 with cookie → original URL
@@ -71,18 +71,22 @@ handles the *owner*, and Lila's own auth handles *everyone else*.
   stay protected by Lila's own `ROLE_ADMIN` authorization.
 - **Owner with an authenticated `lila2` session** — forwarded
   transparently.  "Authenticated" means the `lila2` cookie
-  carries a `sid` key (Lila's logged-in-session marker).
+  carries a `sessionId` key (Lila's logged-in-*user* session id).
+  Note this is distinct from `sid`, an anonymous CSRF/socket id
+  that every visitor — including anonymous guests — carries.
 - **Owner without an authenticated `lila2` session** — auth_proxy
   POSTs admin credentials to Lila's `/login`, captures
   `Set-Cookie: lila2=...; HttpOnly`, issues a 302 to the same
   path with the cookie set.  The user lands logged in as `admin`
-  (a seeded ROLE_ADMIN user).  This case covers both a *missing*
-  `lila2` cookie and a *logged-out* one: when the owner clicks
-  "Log out" in Lila's UI, Lila re-bakes `lila2` to an empty
-  (`sid`-less) session rather than deleting it, so keying on mere
-  cookie presence would strand the owner logged-out forever.  We
-  key on the `sid` key instead, so the next top-level navigation
-  transparently re-establishes the admin session.
+  (a seeded ROLE_ADMIN user).  This case covers three states: a
+  *missing* `lila2` cookie; a *logged-out* one (on "Log out" Lila
+  re-bakes `lila2` to an empty session rather than deleting it);
+  and — because the app is public — an *anonymous guest* `lila2`
+  (Lila mints one on the first page view; it carries `sid` but no
+  `sessionId`).  Keying on `sessionId` rather than `sid` is what
+  makes all three re-trigger auto-login, so the next top-level
+  navigation transparently (re-)establishes the admin session and
+  the owner is never stranded as a guest or logged-out.
 
 Auto-login fires on top-level HTML navigations only (so XHR /
 asset fetches don't get caught in a redirect loop while the

@@ -36,21 +36,25 @@ Auth model summary:
     moderation surfaces stay protected by Lila's own ROLE_ADMIN
     authorization.
 
-  * Owner with an *authenticated* Lila ``lila2`` cookie (one
-    carrying a ``sid`` key) → forward unchanged.
+  * Owner with an *authenticated-user* Lila ``lila2`` cookie
+    (one carrying a ``sessionId`` key) → forward unchanged.
 
-  * Owner without an authenticated Lila session → POST to Lila's
-    /login with admin credentials, capture the Set-Cookie,
+  * Owner without an authenticated-user Lila session → POST to
+    Lila's /login with admin credentials, capture the Set-Cookie,
     issue a 302 to the same path with the cookie set.  We only
     do this on top-level HTML navigations (Accept: text/html)
     so XHR / asset fetches don't get caught in a redirect loop
-    while the session is being established.  Note "without an
-    authenticated session" includes the case where a ``lila2``
-    cookie is present but *logged-out*: when the owner clicks
-    "Log out" in Lila's UI, Lila re-bakes ``lila2`` to an empty
-    (``sid``-less) session rather than deleting it, so a
-    presence-only check would strand the owner logged-out
-    forever.  We key on the ``sid`` key instead — see
+    while the session is being established.  "Without an
+    authenticated-user session" covers three cases: no ``lila2``
+    cookie at all; a *logged-out* cookie (Lila re-bakes ``lila2``
+    to an empty session on "Log out" rather than deleting it);
+    and — importantly, now that the app is public — an
+    *anonymous guest* cookie.  Lila mints a guest ``lila2`` on
+    the first page view, and it carries a ``sid`` (an anonymous
+    CSRF/socket id) but NOT a ``sessionId`` (the logged-in-user
+    id).  So we key on ``sessionId``, never ``sid``: a guest
+    cookie has no ``sessionId``, so the owner still gets
+    auto-logged-in as admin.  See
     ``_has_authenticated_lila_session``.
 
   * /healthz → answered locally by the proxy (200 ``ok``);
@@ -94,21 +98,39 @@ USER_HEADER_NAME = "X-OpenHost-User"
 LILA_SESSION_COOKIE = "lila2"
 
 # Lila's ``lila2`` cookie is a Play signed-session cookie of the form
-# ``<hmac>-<urlencoded-session-querystring>``.  An *authenticated* session
-# carries a ``sid`` key in that querystring (see lila's
-# ``core/security.scala``: ``val sessionId = "sid"``); an anonymous /
-# logged-out session does not.  Crucially, when the owner clicks "Log out"
-# in Lila's UI, Lila does NOT delete the cookie — it re-bakes ``lila2`` to
-# an *empty* session (``lila2=<hmac>-``, no ``sid``).  So the cookie is
-# still present but no longer represents a logged-in user.
+# ``<hmac>-<urlencoded-session-querystring>``.  The querystring can carry
+# two different keys we care about:
 #
-# We therefore must NOT treat the mere presence of a ``lila2`` cookie as
-# "has a session"; otherwise, after a logout, the stale anonymous cookie
-# would suppress auto-login forever and strand the owner as an anonymous
-# visitor on their own instance (defeating the whole point of Pattern B).
-# Instead we treat a ``lila2`` cookie as an authenticated session only when
-# it contains a ``sid`` key.
-LILA_SID_KEY = "sid"
+#   * ``sessionId`` — Lila's *authenticated-user* session id.  Set ONLY
+#     when a real account (e.g. the ``admin`` owner) is logged in.  Lila's
+#     ``SecurityApi`` looks the logged-in user up by this exact key
+#     (``val sessionIdKey = "sessionId"`` → ``reqSessionId`` →
+#     ``store.authInfo(sessionId)``).
+#   * ``sid`` — an anonymous CSRF / socket id (Lila's
+#     ``core/security.scala``: ``val sessionId = "sid"``).  It is present
+#     for EVERYONE, including anonymous guests, because Lila mints a guest
+#     ``lila2`` cookie on the first page view.
+#
+# So three states are distinguishable from the cookie alone:
+#
+#   * logged-in owner  → querystring has ``sessionId`` (and ``sid``)
+#   * anonymous guest  → querystring has ``sid`` but NO ``sessionId``
+#   * logged-out       → empty querystring (``lila2=<hmac>-``)
+#
+# We must treat ONLY the first state as "has an authenticated session".
+# Two reasons:
+#
+#   1. Logout: when the owner clicks "Log out" in Lila's UI, Lila re-bakes
+#      ``lila2`` to an empty session rather than deleting it — a
+#      presence-only check would strand the owner logged-out forever.
+#   2. Public mode: because the app is public (``public_paths = ["/"]``),
+#      the owner's browser very often already holds an anonymous *guest*
+#      ``lila2`` (from browsing before authenticating, or from a shared
+#      link).  A guest cookie carries ``sid`` — so keying on ``sid`` would
+#      wrongly conclude "already authenticated" and NEVER auto-login the
+#      owner as admin.  Keying on ``sessionId`` avoids that: a guest cookie
+#      has no ``sessionId``, so the owner still gets auto-logged-in.
+LILA_AUTHENTICATED_SESSION_KEY = "sessionId"
 
 # Hop-by-hop headers (RFC 9110 §7.6.1) plus the framing headers
 # we rebuild ourselves at the proxy seam.
@@ -204,18 +226,23 @@ def _parse_cookie_header(cookie_header: str | None) -> dict[str, str]:
 
 
 def _has_authenticated_lila_session(cookies: dict[str, str]) -> bool:
-    """Return True iff the ``lila2`` cookie represents a *logged-in* session.
+    """Return True iff the ``lila2`` cookie represents a *logged-in user*.
 
     The cookie value is ``<hmac>-<urlencoded-session-querystring>``.  A
-    logged-in session has a ``sid`` key in the querystring; a logged-out /
-    anonymous one does not (Lila re-bakes an empty session on logout rather
-    than discarding the cookie).  See LILA_SID_KEY above for the rationale.
+    logged-in-user session carries a ``sessionId`` key in the querystring
+    (Lila's authenticated-user session id).  An anonymous guest carries
+    only ``sid`` (present for everyone), and a logged-out session has an
+    empty querystring.  See LILA_AUTHENTICATED_SESSION_KEY above for the
+    full rationale — in particular why ``sid`` is the WRONG key to check
+    (guests have it too, which in the public-app model would suppress
+    owner auto-login).
 
     We only inspect the cookie's own structure — never trust or decode the
     HMAC — so this is a cheap, signature-agnostic check.  A malformed or
-    truncated cookie (no ``-`` separator, empty querystring) is treated as
-    "not authenticated", which is the safe default: worst case we attempt an
-    auto-login that Lila will accept, re-establishing a valid session.
+    truncated cookie (no ``-`` separator, empty querystring, or one with
+    only ``sid``) is treated as "not authenticated", which is the safe
+    default: worst case we attempt an auto-login that Lila will accept,
+    re-establishing a valid admin session.
     """
     raw = cookies.get(LILA_SESSION_COOKIE)
     if not raw:
@@ -227,7 +254,7 @@ def _has_authenticated_lila_session(cookies: dict[str, str]) -> bool:
         # No ``-`` at all: not a well-formed lila2 session cookie.
         return False
     parsed = urllib.parse.parse_qs(querystring, keep_blank_values=False)
-    return LILA_SID_KEY in parsed
+    return LILA_AUTHENTICATED_SESSION_KEY in parsed
 
 
 def _strip_headers(
@@ -450,11 +477,16 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
 
         is_owner = self.headers.get(OWNER_HEADER_NAME, "").lower() == "true"
         cookies = _parse_cookie_header(self.headers.get("Cookie"))
-        # Presence of a lila2 cookie is NOT enough: a logged-out owner still
-        # has a (stale, anonymous) lila2 cookie.  Only a cookie carrying a
-        # ``sid`` counts as an authenticated session; otherwise we re-fire
-        # auto-login so the owner isn't stranded logged-out after clicking
-        # "Log out" in Lila's own UI.  See _has_authenticated_lila_session.
+        # Presence of a lila2 cookie is NOT enough.  A logged-out owner
+        # still has a stale lila2 cookie, and — because the app is public —
+        # the owner often already holds an ANONYMOUS GUEST lila2 (Lila
+        # mints one on the first page view).  Both would suppress
+        # auto-login if we keyed on presence (or on the guest-level
+        # ``sid``).  Only a cookie carrying a ``sessionId`` (Lila's
+        # logged-in-user id) counts as an authenticated session; otherwise
+        # we re-fire auto-login so the owner lands as admin rather than
+        # being stranded as a guest or logged-out.  See
+        # _has_authenticated_lila_session.
         has_lila_session = _has_authenticated_lila_session(cookies)
 
         accept = self.headers.get("Accept", "")

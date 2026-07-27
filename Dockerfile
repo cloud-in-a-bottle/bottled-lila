@@ -5,16 +5,22 @@
 #
 # Architecture:
 #
-#   browser ──HTTPS──▶ OpenHost router (verifies zone_auth JWT,
-#                                       stamps X-OpenHost-Is-Owner)
+#   browser ──HTTPS──▶ OpenHost router (app is public, so anon
+#                                       visitors pass through; stamps
+#                                       X-OpenHost-Is-Owner on the
+#                                       owner's requests)
 #                  ──▶ container :8080  (auth_proxy.py)
 #                          │
-#                          │ owner without lila2 cookie?
+#                          │ owner (X-OpenHost-Is-Owner: true) without
+#                          │ an authenticated lila2 session (no
+#                          │ sessionId — covers missing, logged-out,
+#                          │ and anonymous-guest cookies)?
 #                          │  → POST /login as `admin`,
 #                          │    capture Set-Cookie: lila2=...,
 #                          │    302 with cookie → original URL
 #                          │
 #                          ▼ for everyone else, transparent forward
+#                            (anon guests fall through to Lila)
 #                       127.0.0.1:8081  (Caddy)
 #                          │
 #                          ├──▶ /socket/v6 (WebSocket Upgrade)
