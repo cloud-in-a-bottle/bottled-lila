@@ -116,13 +116,16 @@ fi
 #   * On subsequent boots: read the persisted password back so
 #     it survives container restarts.
 #
-# Why generate rather than use a fixed default?  Even though
-# /login is only reachable via the OpenHost router (which gates
-# anonymous traffic at the public-URL boundary), defense in
-# depth says: don't ship a fixed default password.  If the
-# OpenHost router is ever misconfigured to expose /login as
-# public, every openhost-lila install would have the same
-# trivially-guessable admin password.
+# Why generate rather than use a fixed default?  This app is
+# PUBLIC (openhost.toml sets public_paths = ["/"] so shareable
+# Lichess links work for guests), which means Lila's own /login
+# form is reachable by anonymous internet visitors.  A fixed or
+# guessable admin password would therefore let anyone brute-force
+# their way into the owner's admin account.  A per-install random
+# 32-char password closes that off: even though the owner never
+# types it (auth_proxy auto-logs them in via the OpenHost owner
+# header), it must be strong because it is the credential guarding
+# the internet-facing admin login.
 
 ADMIN_USER="${LILA_ADMIN_USER:-admin}"
 

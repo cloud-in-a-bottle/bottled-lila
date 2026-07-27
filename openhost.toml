@@ -23,27 +23,46 @@ port = 8080
 # and openhost-bookstack use to satisfy OpenHost's "container
 # alive" probe without flapping during cold start.
 health_check = "/healthz"
-# /healthz is the unauth probe used by the OpenHost router and
-# dashboard.  /login is exposed because the auth_proxy POSTs
-# to it from inside the container during the auto-login dance,
-# but it stays unauth from the OpenHost-router perspective so
-# that Lila's own login page stays accessible as a fallback if
-# auto-login ever fails.
+# The whole app is public so shareable Lichess links work for
+# people who are NOT the OpenHost zone owner.  Lichess is a
+# multiplayer/social chess server: the owner sends out an "open
+# challenge" link (``/challenge/<id>``), a live game link
+# (``/<gameId>``), a study, or a tournament URL, and the
+# recipient must be able to open it WITHOUT an OpenHost account.
 #
-# /socket/ is the lila-ws WebSocket endpoint.  The Lichess
-# desktop / mobile clients open a WS connection here for live
-# game updates; bypassing the auth_proxy auto-login dance for
-# WS upgrades avoids a redirect during the WS handshake (which
-# the WS client would error on).  Lila's session cookie travels
-# along on the WS upgrade, so authenticated owner-driven WS
-# connections still work; anonymous WS opens are rejected by
-# lila-ws based on the cookie's absence, not by us.
+# Why ``["/"]`` rather than an enumerated allow-list?  OpenHost's
+# router path matcher is a *prefix* match, and Lila's most
+# important shareable URLs live at the bare domain root — a game
+# is ``/<8-char-gameId>``, playing as a color is
+# ``/<12-char-fullId>``, an open challenge is ``/challenge/<id>``.
+# There is no prefix that isolates those bare-token game URLs
+# from ``/`` itself, so an enumerated list can't cover them.
+# Overleaf (link-shared docs) and Forgejo take the same
+# ``public_paths = ["/"]`` approach for exactly this reason.
 #
-# /assets/ are the static frontend assets — JS, CSS, images.
-# They're hashed-by-content and individually safe to serve to
-# anonymous clients (Caddy serves them directly without ever
-# touching Lila's JVM).
+# This does NOT weaken owner SSO or expose admin surfaces:
+#
+#   * The OpenHost router still verifies the owner's zone_auth
+#     and stamps ``X-OpenHost-Is-Owner: true`` on the owner's
+#     requests even on public paths.  The auth_proxy auto-logs
+#     the owner in as admin exactly as before (its trigger is the
+#     owner header, not the path).
+#   * Anonymous visitors arrive with no owner header, so the
+#     auth_proxy never auto-logs them in — it forwards them to
+#     Lila, which serves them as an ordinary anonymous Lichess
+#     guest (view games, accept open challenges, play as a guest
+#     via Lila's AnonCookie).
+#   * Admin / moderation pages are gated by Lila's own ROLE_ADMIN
+#     authorization, which anonymous guests do not have; Lila
+#     denies them regardless of the OpenHost gate.
+#
+# /healthz stays first for clarity (answered locally by the
+# auth_proxy).  /login, /socket/, /assets/, /api/socket remain
+# meaningful for anonymous guests (login form fallback, live
+# game WebSocket, static assets, socket handshake) and are
+# subsumed by "/" but kept documented here.
 public_paths = [
+    "/",
     "/healthz",
     "/login",
     "/socket/",
