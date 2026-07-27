@@ -29,17 +29,21 @@ build).
 ```
   browser ──HTTPS──▶ OpenHost outer Caddy
                   ──▶ OpenHost router (subdomain lila.<zone>;
-                                       JWT-verifies; stamps
-                                       X-OpenHost-Is-Owner)
+                                       app is public so anon
+                                       visitors pass through;
+                                       stamps X-OpenHost-Is-Owner
+                                       on the owner's requests)
                   ──▶ container :8080  (auth_proxy.py)
                           │
-                          │ owner without an authenticated
-                          │ lila2 session (no sid)?
+                          │ owner (X-OpenHost-Is-Owner: true)
+                          │ without an authenticated lila2
+                          │ session (no sid)?
                           │  → POST /login as `admin`,
                           │    capture Set-Cookie: lila2=...,
                           │    302 with cookie → original URL
                           │
                           ▼ otherwise transparent forward
+                            (anon guests fall through to Lila)
                        127.0.0.1:8081  (Caddy)
                           ├──▶ /socket/v6 (WS Upgrade)
                           │       → 127.0.0.1:9664  (lila-ws)
@@ -52,8 +56,19 @@ build).
 
 ## Auth model
 
-- **Anonymous on a gated path** — OpenHost router 302's to the
-  zone's SSO before the request reaches us.
+The app is **public** (`public_paths = ["/"]`) so that shareable
+Lichess links — open-challenge links, live game URLs, studies,
+tournaments — work for people who do not have an OpenHost account.
+Access control is then split between two layers: the OpenHost router
+handles the *owner*, and Lila's own auth handles *everyone else*.
+
+- **Anonymous visitor** — reaches Lila directly and is served as an
+  ordinary anonymous Lichess guest: they can view games, open a
+  shared challenge link and accept it, and play as a guest (via
+  Lila's `AnonCookie`). They are **never** auto-logged-in as the
+  owner (the auth_proxy's trigger is the router-stamped owner header,
+  which anonymous requests don't carry). Admin/moderation surfaces
+  stay protected by Lila's own `ROLE_ADMIN` authorization.
 - **Owner with an authenticated `lila2` session** — forwarded
   transparently.  "Authenticated" means the `lila2` cookie
   carries a `sid` key (Lila's logged-in-session marker).

@@ -18,11 +18,23 @@ endpoint.
 
 Auth model summary:
 
-  * Anonymous on a path the OpenHost router gates → router 302's
-    to the OpenHost SSO before the request reaches us.  We never
-    see anonymous traffic except on the public_paths declared in
-    openhost.toml: /healthz, /login, /socket/, /assets/,
-    /api/socket.
+  * The app is PUBLIC (openhost.toml declares
+    ``public_paths = ["/"]``) so shareable Lichess links work for
+    people who are not the OpenHost zone owner.  The OpenHost
+    router therefore does NOT 302 anonymous visitors to the zone
+    SSO — anonymous traffic reaches this proxy on every path.
+
+  * Anonymous visitor (no ``X-OpenHost-Is-Owner`` header) →
+    forwarded to Lila unchanged.  Lila serves them as an ordinary
+    anonymous Lichess guest (view games, open a shared challenge
+    link and accept it, play as a guest via Lila's AnonCookie).
+    We never auto-login an anonymous visitor — auto-login is
+    gated on the router-stamped owner header, not on the path —
+    so a forged owner header from an anonymous client cannot mint
+    an admin session (the router strips client-supplied copies,
+    and we strip them again defensively; see below).  Admin /
+    moderation surfaces stay protected by Lila's own ROLE_ADMIN
+    authorization.
 
   * Owner with an *authenticated* Lila ``lila2`` cookie (one
     carrying a ``sid`` key) → forward unchanged.
