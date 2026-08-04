@@ -135,8 +135,17 @@ COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 # case some buildkit pulls them mode-0644.
 COPY auth_proxy.py /opt/openhost-lila/auth_proxy.py
 COPY openhost-init.sh /opt/openhost-lila/openhost-init.sh
-RUN chmod 0755 /opt/openhost-lila/openhost-init.sh \
- && mkdir -p /opt/openhost-lila
+# source-env.sh is sourced by every long-running supervisord child
+# (mongo, redis, caddy, lila-ws, lila, lila-fishnet, auth-proxy).  It
+# waits for openhost-init to write /etc/environment-openhost-lila
+# before continuing, so a child never starts with the image's
+# baked-in placeholder env (e.g. LILA_URL=http://localhost:8080),
+# which would poison lila-ws's Origin/CSRF check and hang the client
+# on "Reconnecting…".
+COPY source-env.sh /opt/openhost-lila/source-env.sh
+RUN mkdir -p /opt/openhost-lila \
+ && chmod 0755 /opt/openhost-lila/openhost-init.sh \
+ && chmod 0644 /opt/openhost-lila/source-env.sh
 
 # OpenHost env contract: $OPENHOST_APP_DATA_DIR is the persistent
 # dir, $OPENHOST_APP_NAME is "lila", $OPENHOST_ZONE_DOMAIN is the
