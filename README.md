@@ -1,7 +1,7 @@
-# openhost-lila
+# bottled-lila
 
 [Lichess (Lila)](https://github.com/lichess-org/lila) chess server,
-packaged for OpenHost with one-click SSO.
+packaged for Cloud in a Bottle with one-click SSO.
 
 ## What this is
 
@@ -62,8 +62,8 @@ build).
 
 The app is **public** (`public_paths = ["/"]`) so that shareable
 Lichess links — open-challenge links, live game URLs, studies,
-tournaments — work for people who do not have an OpenHost account.
-Access control is then split between two layers: the OpenHost router
+tournaments — work for people who do not have a Cloud in a Bottle account.
+Access control is then split between two layers: the Cloud in a Bottle router
 handles the *owner*, and Lila's own auth handles *everyone else*.
 
 - **Anonymous visitor** — reaches Lila directly and is served as an
@@ -118,7 +118,7 @@ fresh install:
 3. Sources `$OPENHOST_ZONE_DOMAIN` / `$OPENHOST_APP_NAME` to
    compute `LILA_DOMAIN` (`lila.<zone>`) and `LILA_URL`
    (`https://lila.<zone>`), writing them to
-   `/etc/environment-openhost-lila` for every supervisord
+   `/etc/environment-bottled-lila` for every supervisord
    child to source.
 
 On subsequent boots:
@@ -133,7 +133,7 @@ On subsequent boots:
 ## Persistence
 
 `$OPENHOST_APP_DATA_DIR` (typically `/data/app_data/lila/` —
-the OpenHost-managed bind mount) holds:
+the Cloud in a Bottle-managed bind mount) holds:
 
 - `mongodb/` — MongoDB data dir (game / user / tournament
   state).  Copied from `/seeded` on first boot only.
@@ -178,7 +178,7 @@ image is non-negotiable; the extra headroom over the original
 
 ## Files
 
-- `openhost.toml` — OpenHost manifest.
+- `openhost.toml` — Cloud in a Bottle manifest.
 - `Dockerfile` — extends `ghcr.io/lichess-org/lila-docker:latest`;
   also copies pre-built lila-fishnet from
   `ghcr.io/lichess-org/lila-fishnet` and downloads the Stockfish
