@@ -1,7 +1,7 @@
 [app]
 name = "lila"
 version = "0.1.0"
-description = "Lichess (Lila) chess server, packaged for OpenHost with one-click SSO.  A self-hosted Lichess instance that lets the OpenHost zone owner play, study, do puzzles, and use Lichess's full feature set without ever seeing Lila's native login page.  Bundles MongoDB, Redis, lila, lila-ws, and Caddy in a single container; pre-seeded with a few hundred sample users so the lobby and tournaments aren't empty."
+description = "Lichess (Lila) chess server, packaged for Cloud in a Bottle with one-click SSO.  A self-hosted Lichess instance that lets the Cloud in a Bottle zone owner play, study, do puzzles, and use Lichess's full feature set without ever seeing Lila's native login page.  Bundles MongoDB, Redis, lila, lila-ws, and Caddy in a single container; pre-seeded with a few hundred sample users so the lobby and tournaments aren't empty."
 authors = ["Andrew Laack <andrew@laack.co>"]
 
 [runtime.container]
