@@ -416,7 +416,14 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
     cred_file: str = "/data/app_data/lila/admin-credentials.txt"
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002, N802
-        log.info("%s - " + format, self.address_string(), *args)
+        # BaseHTTPRequestHandler calls this once per request.  Emitting it at
+        # INFO made the auth-proxy 89% of everything in `oh app logs lila`
+        # (3541 of 4000 lines in a sample window), burying lila's own startup
+        # and error output.  Lila already keeps its own access log, and the
+        # request line can carry query strings, so this is both noise and an
+        # unnecessary second copy of user-visible URLs.  Keep it available for
+        # debugging via AUTH_PROXY_LOG_LEVEL=DEBUG.
+        log.debug("%s - " + format, self.address_string(), *args)
 
     def do_GET(self) -> None:  # noqa: N802
         self._dispatch()

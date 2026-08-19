@@ -239,7 +239,10 @@ export OPENHOST_LILA_REDIS_DIR='$REDIS_DIR'
 export OPENHOST_LILA_FRESHLY_SEEDED='$FRESHLY_SEEDED'
 export OPENHOST_LILA_CRED_FILE='$CRED_FILE'
 EOF
-chmod 0644 "$ENV_FILE"
+# 0600, not 0644: this file carries LILA_ADMIN_PASSWORD in cleartext, and
+# every supervisord child sources it.  There is no reason for it to be
+# world-readable inside the container.
+chmod 0600 "$ENV_FILE"
 
 echo "[openhost-init] LILA_DOMAIN=$LILA_DOMAIN"
 echo "[openhost-init] LILA_URL=$LILA_URL"
