@@ -1,0 +1,193 @@
+bottled-lila
+NOTICE
+
+WHAT THIS REPOSITORY IS
+=======================
+
+This repository is packaging: it builds a container image that runs the
+Lichess server (lila) as a Cloud in a Bottle app. It does not contain the
+chess server itself. The image is built on top of upstream Lichess
+container images and adds an app manifest, a Dockerfile, process
+supervision configuration, an internal reverse-proxy configuration, a
+first-boot init script, and an authentication proxy.
+
+The resulting image redistributes software licensed under the GNU Affero
+General Public License version 3, so the image as a whole is distributed
+under AGPL-3.0. A verbatim copy of that license is in the LICENSE file
+beside this one. The packaging files written for this repository are
+additionally offered under the MIT License (full text at the end of this
+file); that extra grant does not remove the AGPL-3.0 obligations that
+attach to the image.
+
+
+UPSTREAM COMPONENTS
+===================
+
+lila (the Lichess chess server)
+  https://github.com/lichess-org/lila
+  AGPL-3.0-or-later
+  Copyright (c) 2012-2026 the lila authors
+  lila's COPYING.md states AGPL version 3 or later, with exceptions for
+  bundled media assets. See the ASSET LICENSING CAVEAT below, which
+  matters for anyone using this image commercially.
+
+lila-ws (the Lichess WebSocket server)
+  https://github.com/lichess-org/lila-ws
+  AGPL-3.0
+
+lila-docker
+  https://github.com/lichess-org/lila-docker
+  AGPL-3.0
+  Provides the base image this repository extends,
+  ghcr.io/lichess-org/lila-docker:latest, which is the single-container
+  ("mono") image from that project. It ships pre-built lila and lila-ws
+  along with MongoDB, Redis and Caddy.
+
+lila-fishnet (the AI move broker)
+  https://github.com/lichess-org/lila-fishnet
+  AGPL-3.0
+  Consumed as the pre-built image ghcr.io/lichess-org/lila-fishnet:3.0.18.
+  The application and the JDK it ships with are copied into this image.
+
+fishnet (the Stockfish worker)
+  https://github.com/lichess-org/fishnet
+  GPL-3.0-or-later
+  Pinned release v2.8.1. The upstream static Linux x86_64 binary is
+  downloaded at image build time. That binary carries the chess engines
+  fishnet runs: Stockfish (https://github.com/official-stockfish/Stockfish)
+  and, for chess variants, Fairy-Stockfish
+  (https://github.com/ianfab/Fairy-Stockfish). Both engines are
+  GPL-3.0-or-later. Run "fishnet license" for the license text the binary
+  itself ships.
+
+lila-db-seed
+  https://github.com/lichess-org/lila-db-seed
+  MIT
+  Sample database fixtures (users, tournaments, openings). Baked into the
+  upstream base image and copied into the app's data directory on first
+  boot, so this image redistributes them.
+
+MongoDB, Redis and Caddy are bundled by the upstream base image
+(ghcr.io/lichess-org/lila-docker:latest) rather than installed by this
+repository. They keep their own licenses: Caddy is Apache-2.0, MongoDB
+Community builds are under the Server Side Public License, and Redis is
+BSD-3-Clause through release 7.2 and dual RSALv2 / SSPLv1 from 7.4 onward.
+Inspect the base image to see which versions, and therefore which of those
+terms, apply to a given build.
+
+
+SOURCE OFFER (AGPL-3.0 SECTION 13, GPL-3.0 SECTION 6)
+=====================================================
+
+Complete Corresponding Source for every component listed above is publicly
+available from the upstream repositories at the URLs listed above. The
+Corresponding Source for the packaging in this image is this repository
+itself.
+
+The exact pinned artifacts a build of this image uses:
+
+  base image (lila, lila-ws, MongoDB, Redis, Caddy):
+      ghcr.io/lichess-org/lila-docker:latest
+      source: https://github.com/lichess-org/lila-docker
+              https://github.com/lichess-org/lila
+              https://github.com/lichess-org/lila-ws
+
+  AI move broker:
+      ghcr.io/lichess-org/lila-fishnet:3.0.18
+      source: https://github.com/lichess-org/lila-fishnet
+
+  Stockfish worker:
+      fishnet v2.8.1
+      source: https://github.com/lichess-org/fishnet
+      release: https://github.com/lichess-org/fishnet/releases/tag/v2.8.1
+
+  packaging:
+      this repository
+
+Important: the base image is pinned only by the mutable tag ":latest", so
+the tag alone does not identify one revision of lila or lila-ws. Record the
+resolved image digest at build time (for example with "docker buildx
+imagetools inspect ghcr.io/lichess-org/lila-docker:latest", or "docker
+image inspect" on the pulled image) and keep that digest with the built
+image. The digest is what lets the exact upstream source revision behind a
+given build be identified later. Whoever distributes a build of this image,
+or offers network access to it, is responsible for providing Corresponding
+Source that matches the digest they used.
+
+Requests for the Corresponding Source used by a build published from this
+repository can be sent to andrew@laack.co, or filed as an issue on this
+repository.
+
+
+ASSET LICENSING CAVEAT (READ BEFORE ANY COMMERCIAL USE)
+=======================================================
+
+lila's COPYING.md lists exceptions to the AGPL for bundled media, and some of
+those exceptions forbid commercial use.
+
+Many of the piece sets under public/piece/ are licensed
+CC BY-NC-SA (Creative Commons Attribution-NonCommercial-ShareAlike), which
+permits non-commercial use only: at the time of writing that covers
+anarcandy, caliente, california, cardinal, cooke, disguised, dubrovny,
+fresca, gioco, horsey, icpieces, maestro, monarchy, staunty, tatiana and
+xkcd. The sound set public/sounds/lisp is CC BY-NC-SA as well. lila's
+"Exceptions (non-free)" table restricts further assets: public/piece/alpha is
+"free for personal non commercial use", several piece sets are labelled only
+"freeware", some carry no stated license at all, the Lichess logo and favicon
+may be used only to refer to lichess.org, and the remaining sounds under
+public/sound and artwork under public/images are covered by that same
+non-free list.
+
+The upstream base image ships lila's public/ directory wholesale, so this
+image contains those assets.
+
+Consequence, stated plainly: this image, as built, may not be used or
+redistributed commercially. Anyone who wants to redistribute or operate it
+commercially must first strip out or replace every asset that is restricted
+to non-commercial or personal use, or obtain separate permission from the
+asset authors. Check the current per-asset tables in lila's COPYING.md
+(https://github.com/lichess-org/lila/blob/master/COPYING.md) before relying
+on any of this, because the set of bundled assets changes upstream.
+
+
+PACKAGING FILES IN THIS REPOSITORY
+==================================
+
+These files were written for this repository and are offered under the MIT
+License below, in addition to the AGPL-3.0 terms that govern the image as a
+whole:
+
+  Dockerfile
+  openhost.toml
+  supervisord.conf
+  mono.Caddyfile
+  auth_proxy.py
+  openhost-init.sh
+  source-env.sh
+  README.md
+
+supervisord.conf and mono.Caddyfile started as edited copies of the
+equivalent configuration in lila-docker; upstream's AGPL-3.0 terms continue
+to apply to whatever material in them is derived from that project.
+
+MIT License
+
+Copyright (c) 2026 Andrew Laack
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
