@@ -416,7 +416,12 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
     cred_file: str = "/data/app_data/lila/admin-credentials.txt"
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002, N802
-        log.info("%s - " + format, self.address_string(), *args)
+        # Per-request access logging belongs at DEBUG here: lila already keeps
+        # its own access log, so emitting it at INFO duplicates every
+        # user-visible URL (query strings included) and drowns out lila's
+        # startup and error output in `oh app logs`.  Raise with
+        # AUTH_PROXY_LOG_LEVEL=DEBUG when debugging the proxy itself.
+        log.debug("%s - " + format, self.address_string(), *args)
 
     def do_GET(self) -> None:  # noqa: N802
         self._dispatch()

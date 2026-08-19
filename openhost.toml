@@ -75,12 +75,19 @@ public_paths = [
 # pins (see lila-docker/docker/mono.Dockerfile).  Plus MongoDB,
 # Redis, lila-ws (another JVM, smaller heap), Caddy, and now
 # lila-fishnet (a third, small JVM) + a Stockfish worker (2 cores
-# of native search during AI games).  Bump to 8 GiB / 4 CPUs so the
-# fishnet worker's Stockfish search doesn't starve the lila /
-# lila-ws JVMs while an AI game is in progress.  The OpenHost host
-# on andrew-1 has 31 GiB so this is comfortable.
+# of native search during AI games), plus a second 1-core Stockfish
+# worker for background game analysis.  8 GiB / 4 CPUs keeps the
+# fishnet workers' search from starving the lila / lila-ws JVMs while
+# an AI game is in progress.
+#
+# Heap budget inside that 8 GiB: the upstream mono image bakes
+# JAVA_OPTS="-Xms4g -Xmx4g" into the image ENV, which every JVM
+# inherits.  supervisord.conf overrides JAVA_OPTS per program so only
+# lila keeps the 4 GiB reservation (lila-ws 1 GiB, lila-fishnet
+# 512 MiB); without those overrides the three JVMs commit 12 GiB in an
+# 8 GiB cgroup and the container lives on swap.
 memory_mb = 8192
-cpu_millicores = 4000
+cpu_cores = 4.0
 
 [data]
 # Persistent state under /data/app_data/lila/:
