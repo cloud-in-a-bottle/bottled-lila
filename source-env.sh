@@ -62,3 +62,15 @@ done
 
 # shellcheck source=/dev/null
 . "$_openhost_lila_env_file"
+
+# Fail loud rather than silently running with the image's baked-in
+# placeholders.  openhost-init writes this file atomically, so seeing it at
+# all should mean seeing it complete; this is the backstop that turns any
+# future regression into an obvious crash-loop instead of a site that answers
+# 301 to http://localhost:8080/ and rejects every WebSocket handshake.
+case "${LILA_URL:-}" in
+	""|*localhost*)
+		echo "[source-env] FATAL: LILA_URL is '${LILA_URL:-<unset>}' after sourcing $_openhost_lila_env_file; refusing to start with the image's placeholder origin" >&2
+		exit 1
+		;;
+esac
