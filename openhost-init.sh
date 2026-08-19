@@ -68,10 +68,10 @@ LILA_URL="https://${LILA_DOMAIN}"
 #
 # Idempotency: if the persistent dir is missing or empty we
 # always re-seed; if it already has WiredTiger data we leave it
-# alone.  reset-db.sh runs unconditionally on every boot too —
-# it's a separate seeding pass that re-applies user and content
-# fixtures on top of whatever's there, but it's idempotent and
-# skips users that already exist.
+# alone.  reset-db.sh is a separate, DESTRUCTIVE seeding pass (it
+# passes --drop-db), so supervisord runs it only when this script
+# reports a fresh seed via OPENHOST_LILA_FRESHLY_SEEDED=1; on every
+# later boot it is skipped so operator state survives.
 
 # A single sentinel — the presence of MongoDB's WiredTiger.wt
 # storage file — is the source of truth for "this dir is a
@@ -201,8 +201,10 @@ fi
 # requires updating the admin user's bpass in MongoDB too,
 # because reset-db.sh runs on first boot only (it's
 # destructive — passes --drop-db).  Rotation flow:
-#   1. Delete $PERSIST/.seeded-once and the entire
-#      $PERSIST/mongodb dir.
+#   1. Delete the entire $PERSIST/mongodb dir.  Its absence is
+#      what makes this script re-seed and set
+#      OPENHOST_LILA_FRESHLY_SEEDED=1, which is what re-enables
+#      reset-db.sh.
 #   2. Set LILA_ADMIN_PASSWORD=<new> via OpenHost env vars.
 #   3. Restart the app.  reset-db.sh re-runs with the new
 #      password and the persistent dir is repopulated.
