@@ -82,9 +82,14 @@
 # pair: lila-fishnet v3.0.18 + fishnet worker v2.8.1 (the newest
 # worker release that still sends the key in the body; v2.9.0+
 # switched to the bearer-header protocol).
-FROM ghcr.io/lichess-org/lila-fishnet:3.0.18 AS lila-fishnet
+FROM ghcr.io/lichess-org/lila-fishnet:3.0.18@sha256:468549dea5b8af4a20ddc67c7f1895060f6f7642d372478afd2bfb58f8bbc70b AS lila-fishnet
 
-FROM ghcr.io/lichess-org/lila-docker:latest
+# lila-docker publishes no release tags, only branch builds (:latest is the
+# main branch). Pinned by digest to the :latest build of lila-docker commit
+# f1e918c9745972ddef9606c07a9d4d101f34c46d (built 2026-10-11, lila-master),
+# so a new push upstream can't change what we ship. To bump, take the
+# current :latest digest and update the commit here.
+FROM ghcr.io/lichess-org/lila-docker:latest@sha256:df4a41084f1c71af8d7f364447819705caeefd9ff0dfd8c04c814b8781ff2fb4
 
 # Bring in the pre-built lila-fishnet app and the JDK it ships with.
 # sbt-native-packager lays the app out under /opt/docker (launcher
@@ -105,9 +110,13 @@ COPY --from=lila-fishnet /opt/java/openjdk /opt/lila-fishnet-java
 # and would be rejected with 422 by v3.0.18.  In lila's offline_mode
 # (base.conf: fishnet.offline_mode = true) any client may serve moves
 # without a registered key.
+# Upstream publishes no checksums file; the sha256 is of the release asset
+# (unchanged since it was uploaded on 2024-01-04). Bump it with the version.
 ARG FISHNET_VERSION=v2.8.1
+ARG FISHNET_SHA256=8accf54e4aa77fc258726485a71f18de8fb3f18efccc2b2ee835526b2544c126
 RUN curl -fsSL -o /usr/local/bin/fishnet \
       "https://github.com/lichess-org/fishnet/releases/download/${FISHNET_VERSION}/fishnet-${FISHNET_VERSION}-x86_64-unknown-linux-musl" \
+ && echo "${FISHNET_SHA256}  /usr/local/bin/fishnet" | sha256sum -c - \
  && chmod 0755 /usr/local/bin/fishnet \
  && /usr/local/bin/fishnet --version
 
