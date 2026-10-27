@@ -308,6 +308,7 @@ def _login_to_lila(
     username: str,
     password: str,
     forwarded_host: str,
+    public_origin: str,
 ) -> list[str] | None:
     """POST credentials to Lila's /login (via Caddy, which routes
     on path) and return the Set-Cookie header value (the entire
@@ -324,7 +325,8 @@ def _login_to_lila(
     request — Lila's Origin check on /login requires the public
     domain.  Falls back to ``upstream_host:upstream_port`` for
     direct-loopback diagnostic calls (which won't pass Origin
-    validation but produce a clear error in logs).
+    validation but produce a clear error in logs).  ``public_origin``
+    is the Origin sent, and must match Lila's base URL (LILA_URL).
     """
     payload = urllib.parse.urlencode({
         "username": username,
@@ -343,7 +345,7 @@ def _login_to_lila(
             body=payload,
             headers={
                 "Host": host_header,
-                "Origin": f"https://{host_header}",
+                "Origin": public_origin,
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Content-Length": str(len(payload)),
                 # Lila returns plain HTML on the login form for
@@ -414,6 +416,7 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
     upstream_host: str = "127.0.0.1"
     upstream_port: int = 8081
     cred_file: str = "/data/app_data/lila/admin-credentials.txt"
+    public_origin: str = ""
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002, N802
         # Per-request access logging belongs at DEBUG here: lila already keeps
@@ -543,6 +546,7 @@ class AuthProxyHandler(BaseHTTPRequestHandler):
             username,
             password,
             forwarded_host,
+            self.public_origin,
         )
         if cookie_lines is None:
             return False
@@ -894,6 +898,8 @@ def main() -> int:
     AuthProxyHandler.upstream_host = upstream_host
     AuthProxyHandler.upstream_port = upstream_port
     AuthProxyHandler.cred_file = cred_file
+    # Lila's public base URL, from openhost-init.sh's env file (sourced before this starts).
+    AuthProxyHandler.public_origin = os.environ["LILA_URL"]
 
     try:
         server = IPv4ThreadingServer(("0.0.0.0", listen_port), AuthProxyHandler)
