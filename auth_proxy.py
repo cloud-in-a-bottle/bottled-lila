@@ -93,7 +93,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import AbstractSet, Iterable
 
-OWNER_HEADER_NAME = "X-Disabled-Is-Owner"
+OWNER_HEADER_NAME = "X-OpenHost-Is-Owner"
 USER_HEADER_NAME = "X-OpenHost-User"
 LILA_SESSION_COOKIE = "lila2"
 
