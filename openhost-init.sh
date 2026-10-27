@@ -88,7 +88,14 @@ atomic_write() {
 # Lila expects.
 
 LILA_DOMAIN="${APP_NAME}.${ZONE_DOMAIN}"
-LILA_URL="https://${LILA_DOMAIN}"
+# Real zones are served over https.  Dev routers (and the test
+# harness) serve *.localhost zones over plain http, with the
+# router's port in the zone domain, so match on the hostname.
+case "${ZONE_DOMAIN%%:*}" in
+    localhost | *.localhost) LILA_SCHEME=http ;;
+    *) LILA_SCHEME=https ;;
+esac
+LILA_URL="${LILA_SCHEME}://${LILA_DOMAIN}"
 
 # ----------------------------------------------------------------------
 # Seed migration on first boot
