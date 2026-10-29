@@ -70,19 +70,17 @@
 # official image rather than run a 20-minute sbt build.
 #
 # Version pinning is load-bearing here.  The fishnet worker and
-# lila-fishnet must agree on the /fishnet HTTP protocol.  Upstream
-# fishnet PR #298 ("remove auth from body", merged 2026-07-23)
-# switched the worker to send its key in an Authorization: Bearer
-# header with an empty JSON body; lila-fishnet's git master was
-# updated to match, but the latest *released* lila-fishnet image
-# (v3.0.18) still uses the OLD protocol, where the worker sends
-# {"fishnet":{"version","apikey"}} in the request body.  If these
-# disagree, every /fishnet/acquire is rejected (422) and the AI
-# opponent never moves.  So we pin BOTH to the matching OLD-protocol
-# pair: lila-fishnet v3.0.18 + fishnet worker v2.8.1 (the newest
-# worker release that still sends the key in the body; v2.9.0+
-# switched to the bearer-header protocol).
-FROM ghcr.io/lichess-org/lila-fishnet:3.0.18@sha256:468549dea5b8af4a20ddc67c7f1895060f6f7642d372478afd2bfb58f8bbc70b AS lila-fishnet
+# lila-fishnet must agree on the /fishnet HTTP protocol.  fishnet
+# v2.14.0 (PR #298, "remove auth from body") switched the worker to
+# send its key only in an Authorization: Bearer header with no
+# {"fishnet":{"version","apikey"}} body, and lila-fishnet v3.0.19
+# (#625, #628) reads the key from the bearer header and stopped
+# parsing it from the body.  If the two disagree, every
+# /fishnet/acquire is rejected (422) and the AI opponent never moves.
+# So we pin BOTH to a matching bearer-protocol pair: lila-fishnet
+# v3.0.19 + fishnet worker v2.15.0.  (The previous old-protocol pair
+# was lila-fishnet v3.0.18 + fishnet v2.8.1.)
+FROM ghcr.io/lichess-org/lila-fishnet:3.0.19@sha256:4d646c29f5246405411aa1bfaf884b136dd1677fdcd06ccab8c88a17f9f9ec5b AS lila-fishnet
 
 # lila-docker publishes no release tags, only branch builds (:latest is the
 # main branch). Pinned by digest to the :latest build of lila-docker commit
@@ -103,19 +101,18 @@ COPY --from=lila-fishnet /opt/java/openjdk /opt/lila-fishnet-java
 
 # fishnet — the Stockfish worker that actually computes the moves.
 # Static x86_64 musl binary from the upstream release; no runtime
-# deps.  Pinned to v2.8.1 — the newest worker release whose
-# /fishnet/acquire body ({"fishnet":{version,apikey}}) matches the
-# lila-fishnet v3.0.18 image above (see the version-pinning note on
-# the lila-fishnet stage).  v2.9.0+ moved the key to a bearer header
-# and would be rejected with 422 by v3.0.18.  In lila's offline_mode
-# (base.conf: fishnet.offline_mode = true) any client may serve moves
-# without a registered key.
-# Upstream publishes no checksums file; the sha256 is of the release asset
-# (unchanged since it was uploaded on 2024-01-04). Bump it with the version.
-ARG FISHNET_VERSION=v2.8.1
-ARG FISHNET_SHA256=8accf54e4aa77fc258726485a71f18de8fb3f18efccc2b2ee835526b2544c126
+# deps.  Pinned to v2.15.0, which speaks the bearer-header
+# /fishnet protocol that the lila-fishnet v3.0.19 image above expects
+# (see the version-pinning note on the lila-fishnet stage).  In lila's
+# offline_mode (base.conf: fishnet.offline_mode = true) any client may
+# serve moves without a registered key.
+# Upstream publishes no checksums file; the sha256 is of the GitHub
+# release asset, which is identical to the S3 mirror linked from the
+# release notes. Bump it with the version.
+ARG FISHNET_VERSION=v2.15.0
+ARG FISHNET_SHA256=9e17dbeb2e146b30be8d801864c265af419477fdabf8ea4d983e4aa498afbde4
 RUN curl -fsSL -o /usr/local/bin/fishnet \
-      "https://github.com/lichess-org/fishnet/releases/download/${FISHNET_VERSION}/fishnet-${FISHNET_VERSION}-x86_64-unknown-linux-musl" \
+      "https://github.com/lichess-org/fishnet/releases/download/${FISHNET_VERSION}/fishnet-x86_64-unknown-linux-musl" \
  && echo "${FISHNET_SHA256}  /usr/local/bin/fishnet" | sha256sum -c - \
  && chmod 0755 /usr/local/bin/fishnet \
  && /usr/local/bin/fishnet --version
