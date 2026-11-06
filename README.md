@@ -58,6 +58,13 @@ Back up that whole directory.
 WebSocket sidecar and an AI move broker each run their own JVM, and Stockfish
 workers run native search while computer games or analysis are in progress.
 
+## Prebuilt image
+
+`cloudinabottle.toml` sets `prebuilt_image`, so Cloud in a Bottle pulls our
+signed prebuilt image (built by CI from each release tag) instead of building
+the Dockerfile. To fork and modify this app, comment out `prebuilt_image` so
+your instance builds from source.
+
 ## License
 
 Upstream lila, lila-ws, lila-docker and lila-fishnet are AGPL-3.0, and the
