@@ -78,7 +78,8 @@ def test_computer_opponent_moves(stack: OpenhostStack) -> None:
         headers={**HTML, "Origin": stack.url},
         timeout=30,
     )
-    game = re.fullmatch(r"/(\w{8})(\w{4})?", response.url.split(stack.url, 1)[-1])
+    # Game pages live under /game/ since lila moved them there (October 2026).
+    game = re.fullmatch(r"/game/(\w{8})(\w{4})?", response.url.split(stack.url, 1)[-1])
     assert response.status_code == 200 and game, f"POST /setup/ai ended at {response.url}: {_context(stack, response)}"
     # We play black, so the computer (white) has to make the first move.
     deadline = time.monotonic() + 300
