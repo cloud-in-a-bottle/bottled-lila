@@ -84,10 +84,12 @@ FROM ghcr.io/lichess-org/lila-fishnet:3.0.19@sha256:4d646c29f5246405411aa1bfaf88
 
 # lila-docker publishes no release tags, only branch builds (:latest is the
 # main branch). Pinned by digest to the :latest build of lila-docker commit
-# f1e918c9745972ddef9606c07a9d4d101f34c46d (built 2026-10-11, lila-master),
-# so a new push upstream can't change what we ship. To bump, take the
-# current :latest digest and update the commit here.
-FROM ghcr.io/lichess-org/lila-docker:latest@sha256:df4a41084f1c71af8d7f364447819705caeefd9ff0dfd8c04c814b8781ff2fb4
+# 18586dc7e0ae261a7384394d90ff02af7cdce979 (built 2026-11-05 from lila master
+# 089ffa1402afbeb5b6370d4e2763e674cab43cae),
+# so a new push upstream can't change what we ship. To bump, take the digest
+# of a :latest build at least 7 days old (the "Publish Image" run log in
+# lila-docker prints it) and update the commits here.
+FROM ghcr.io/lichess-org/lila-docker:latest@sha256:6c74b886f75b62a596f01526b3822a6621af5cb6b6059e675f282b0949ce9aa4
 
 # Bring in the pre-built lila-fishnet app and the JDK it ships with.
 # sbt-native-packager lays the app out under /opt/docker (launcher
